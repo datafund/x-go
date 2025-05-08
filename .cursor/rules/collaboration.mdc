@@ -1,0 +1,30 @@
+---
+description: >
+globs: 
+alwaysApply: true
+---
+
+# Collaboration Rules for AI Agent Development
+
+1. **Objective:** Define and implement an MCP-compliant API with `github.com/imperatrona/twitter-scraper`
+    * Focus on building AI agents that can interact with the Twitter API.
+    * Ensure agents are modular, reusable, and maintainable.
+    * Use the MCP (Multi-Agent Communication Protocol) for agent communication.
+
+
+2. **Technology Stack:**
+   * Use Go and use `github.com/imperatrona/twitter-scraper` and `github.com/mark3labs/mcp-go` library.
+   * Use `https://pkg.go.dev/github.com/imperatrona/twitter-scraper#section-documentation` to access X data.
+   - Tooling: go test, go mod, golangci-lint
+
+3.  **MCP Focus:** Prioritize correct MCP implementation, defining resources, prompts, and tools according to needs. Ensure adherence to MCP specifications.
+4.  **Simplicity First:** Keep the implementation direct and avoid unnecessary complexity. Changes should be minimal and targeted.
+5.  **Code Standards:**
+    *   Write idiomatic Go code.
+    *   Follow Go best practices (e.g., effective Go).
+    *   Keep code DRY (Don't Repeat Yourself).
+    *   Provide complete functions or relevant code blocks for clarity.
+
+6.  **Communication:** Explain steps and reasoning. Ask questions or provide direction if needed.
+7.  **Tool Use:** Use available tools (read, search, edit) as needed, explaining the purpose.
+
