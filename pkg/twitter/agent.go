@@ -28,19 +28,22 @@ type Scraper interface {
 	Unfollow(ctx context.Context, id string) error
 	Login(credentials ...string) error
 	GetCookies() []*http.Cookie
+	FetchFollowers(username string, maxUsersNbr int, cursor string) ([]*twitterscraper.Profile, string, error)
 }
 
 // Agent represents a Twitter MCP agent
 type Agent struct {
-	scraper Scraper
-	limiter *rateLimiter
+	scraper  Scraper
+	limiter  *rateLimiter
+	username string
 }
 
 // NewAgent creates a new Twitter MCP agent
-func NewAgent() *Agent {
+func NewAgent(username string) *Agent {
 	return &Agent{
-		scraper: newScraperWrapper(),
-		limiter: newRateLimiter(),
+		scraper:  newScraperWrapper(),
+		limiter:  newRateLimiter(),
+		username: username,
 	}
 }
 
@@ -132,6 +135,37 @@ func (a *Agent) GetTools() []server.ServerTool {
 				},
 			},
 			Handler: a.handleGetTweet,
+		},
+		{
+			Tool: mcp.Tool{
+				Name:        "get_followers",
+				Description: "Get followers of a specific user",
+				InputSchema: mcp.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]interface{}{
+						"username": map[string]interface{}{
+							"type":        "string",
+							"description": "Twitter username",
+						},
+						"limit": map[string]interface{}{
+							"type":        "number",
+							"description": "Maximum number of followers to fetch",
+							"default":     50,
+						},
+						"cursor": map[string]interface{}{
+							"type":        "string",
+							"description": "Cursor for pagination",
+						},
+					},
+					Required: []string{"username"},
+				},
+				Annotations: mcp.ToolAnnotation{
+					Title:         "Get User Followers",
+					ReadOnlyHint:  true,
+					OpenWorldHint: true,
+				},
+			},
+			Handler: a.handleGetFollowers,
 		},
 	}
 
@@ -276,7 +310,17 @@ func (a *Agent) handleGetUserTweets(ctx context.Context, request mcp.CallToolReq
 	}
 
 	// Wait for rate limit
-	a.limiter.waitForEndpoint("get_user_tweets")
+	if err := a.limiter.waitForEndpoint(ctx, "get_user_tweets"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
 
 	tweets := a.scraper.GetTweets(ctx, username, limit)
 	var results []twitterscraper.TweetResult
@@ -334,7 +378,17 @@ func (a *Agent) handleGetProfile(ctx context.Context, request mcp.CallToolReques
 	}
 
 	// Wait for rate limit
-	a.limiter.waitForEndpoint("get_profile")
+	if err := a.limiter.waitForEndpoint(ctx, "get_profile"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
 
 	profile, err := a.scraper.GetProfile(ctx, username)
 	if err != nil {
@@ -387,7 +441,17 @@ func (a *Agent) handleGetTweet(ctx context.Context, request mcp.CallToolRequest)
 	}
 
 	// Wait for rate limit
-	a.limiter.waitForEndpoint("get_tweet")
+	if err := a.limiter.waitForEndpoint(ctx, "get_tweet"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
 
 	tweet, err := a.scraper.GetTweet(ctx, tweetID)
 	if err != nil {
@@ -457,7 +521,17 @@ func (a *Agent) handleSearchTweets(ctx context.Context, request mcp.CallToolRequ
 	}
 
 	// Wait for rate limit
-	a.limiter.waitForEndpoint("search_tweets")
+	if err := a.limiter.waitForEndpoint(ctx, "search_tweets"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
 
 	tweets := a.scraper.SearchTweets(ctx, query, limit)
 	var results []map[string]interface{}
@@ -538,7 +612,17 @@ func (a *Agent) handleCreateTweet(ctx context.Context, request mcp.CallToolReque
 	}
 
 	// Wait for rate limit
-	a.limiter.waitForEndpoint("create_tweet")
+	if err := a.limiter.waitForEndpoint(ctx, "create_tweet"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
 
 	tweet, err := a.scraper.Tweet(ctx, text)
 	if err != nil {
@@ -603,7 +687,17 @@ func (a *Agent) handleLikeTweet(ctx context.Context, request mcp.CallToolRequest
 	}
 
 	// Wait for rate limit
-	a.limiter.waitForEndpoint("like_tweet")
+	if err := a.limiter.waitForEndpoint(ctx, "like_tweet"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
 
 	err := a.scraper.LikeTweet(ctx, tweetID)
 	if err != nil {
@@ -655,7 +749,17 @@ func (a *Agent) handleFollowUser(ctx context.Context, request mcp.CallToolReques
 	}
 
 	// Wait for rate limit
-	a.limiter.waitForEndpoint("follow_user")
+	if err := a.limiter.waitForEndpoint(ctx, "follow_user"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
 
 	err := a.scraper.Follow(ctx, userID)
 	if err != nil {
@@ -707,7 +811,17 @@ func (a *Agent) handleUnfollowUser(ctx context.Context, request mcp.CallToolRequ
 	}
 
 	// Wait for rate limit
-	a.limiter.waitForEndpoint("unfollow_user")
+	if err := a.limiter.waitForEndpoint(ctx, "unfollow_user"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
 
 	err := a.scraper.Unfollow(ctx, userID)
 	if err != nil {
@@ -759,7 +873,17 @@ func (a *Agent) handleUnlikeTweet(ctx context.Context, request mcp.CallToolReque
 	}
 
 	// Wait for rate limit
-	a.limiter.waitForEndpoint("unlike_tweet")
+	if err := a.limiter.waitForEndpoint(ctx, "unlike_tweet"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
 
 	err := a.scraper.UnlikeTweet(ctx, tweetID)
 	if err != nil {
@@ -811,7 +935,17 @@ func (a *Agent) handleRetweet(ctx context.Context, request mcp.CallToolRequest) 
 	}
 
 	// Wait for rate limit
-	a.limiter.waitForEndpoint("retweet")
+	if err := a.limiter.waitForEndpoint(ctx, "retweet"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
 
 	err := a.scraper.CreateRetweet(ctx, tweetID)
 	if err != nil {
@@ -831,6 +965,84 @@ func (a *Agent) handleRetweet(ctx context.Context, request mcp.CallToolRequest) 
 			&mcp.TextContent{
 				Type: "text",
 				Text: "Tweet retweeted successfully",
+			},
+		},
+	}, nil
+}
+
+func (a *Agent) handleGetFollowers(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	username, ok := request.Params.Arguments["username"].(string)
+	if !ok || username == "" {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: "username parameter is required",
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	limit := 50
+	if limitVal, ok := request.Params.Arguments["limit"].(float64); ok {
+		limit = int(limitVal)
+	}
+
+	cursor := ""
+	if cursorVal, ok := request.Params.Arguments["cursor"].(string); ok {
+		cursor = cursorVal
+	}
+
+	// Wait for rate limit
+	if err := a.limiter.waitForEndpoint(ctx, "get_followers"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	followers, nextCursor, err := a.scraper.FetchFollowers(username, limit, cursor)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("error getting followers: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	result := map[string]interface{}{
+		"followers":   followers,
+		"next_cursor": nextCursor,
+	}
+
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("error marshaling results: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Type: "text",
+				Text: string(jsonData),
 			},
 		},
 	}, nil
@@ -932,9 +1144,9 @@ func (a *Agent) HandleGetTweet(ctx context.Context, tweetID string) (interface{}
 	return data, nil
 }
 
-// HandleSearchTweets handles searching tweets
-func (a *Agent) HandleSearchTweets(ctx context.Context, query string, limit int) (interface{}, error) {
-	result, err := a.handleSearchTweets(ctx, mcp.CallToolRequest{
+// HandleGetFollowers handles getting user followers
+func (a *Agent) HandleGetFollowers(ctx context.Context, username string, limit int, cursor string) (interface{}, error) {
+	result, err := a.handleGetFollowers(ctx, mcp.CallToolRequest{
 		Params: struct {
 			Name      string                 `json:"name"`
 			Arguments map[string]interface{} `json:"arguments,omitempty"`
@@ -943,8 +1155,9 @@ func (a *Agent) HandleSearchTweets(ctx context.Context, query string, limit int)
 			} `json:"_meta,omitempty"`
 		}{
 			Arguments: map[string]interface{}{
-				"query": query,
-				"limit": float64(limit),
+				"username": username,
+				"limit":    float64(limit),
+				"cursor":   cursor,
 			},
 		},
 	})
@@ -959,153 +1172,4 @@ func (a *Agent) HandleSearchTweets(ctx context.Context, query string, limit int)
 		return nil, err
 	}
 	return data, nil
-}
-
-// HandleCreateTweet handles creating a tweet
-func (a *Agent) HandleCreateTweet(ctx context.Context, text string, scheduleTime string) (interface{}, error) {
-	result, err := a.handleCreateTweet(ctx, mcp.CallToolRequest{
-		Params: struct {
-			Name      string                 `json:"name"`
-			Arguments map[string]interface{} `json:"arguments,omitempty"`
-			Meta      *struct {
-				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
-			} `json:"_meta,omitempty"`
-		}{
-			Arguments: map[string]interface{}{
-				"text":          text,
-				"schedule_time": scheduleTime,
-			},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if result.IsError {
-		return nil, fmt.Errorf(result.Content[0].(*mcp.TextContent).Text)
-	}
-	var data interface{}
-	if err := json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &data); err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
-// HandleLikeTweet handles liking a tweet
-func (a *Agent) HandleLikeTweet(ctx context.Context, tweetID string) error {
-	result, err := a.handleLikeTweet(ctx, mcp.CallToolRequest{
-		Params: struct {
-			Name      string                 `json:"name"`
-			Arguments map[string]interface{} `json:"arguments,omitempty"`
-			Meta      *struct {
-				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
-			} `json:"_meta,omitempty"`
-		}{
-			Arguments: map[string]interface{}{
-				"tweet_id": tweetID,
-			},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	if result.IsError {
-		return fmt.Errorf(result.Content[0].(*mcp.TextContent).Text)
-	}
-	return nil
-}
-
-// HandleFollow handles following a user
-func (a *Agent) HandleFollow(ctx context.Context, userID string) error {
-	result, err := a.handleFollowUser(ctx, mcp.CallToolRequest{
-		Params: struct {
-			Name      string                 `json:"name"`
-			Arguments map[string]interface{} `json:"arguments,omitempty"`
-			Meta      *struct {
-				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
-			} `json:"_meta,omitempty"`
-		}{
-			Arguments: map[string]interface{}{
-				"user_id": userID,
-			},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	if result.IsError {
-		return fmt.Errorf(result.Content[0].(*mcp.TextContent).Text)
-	}
-	return nil
-}
-
-// HandleUnfollow handles unfollowing a user
-func (a *Agent) HandleUnfollow(ctx context.Context, userID string) error {
-	result, err := a.handleUnfollowUser(ctx, mcp.CallToolRequest{
-		Params: struct {
-			Name      string                 `json:"name"`
-			Arguments map[string]interface{} `json:"arguments,omitempty"`
-			Meta      *struct {
-				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
-			} `json:"_meta,omitempty"`
-		}{
-			Arguments: map[string]interface{}{
-				"user_id": userID,
-			},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	if result.IsError {
-		return fmt.Errorf(result.Content[0].(*mcp.TextContent).Text)
-	}
-	return nil
-}
-
-// HandleUnlikeTweet handles unliking a tweet
-func (a *Agent) HandleUnlikeTweet(ctx context.Context, tweetID string) error {
-	result, err := a.handleUnlikeTweet(ctx, mcp.CallToolRequest{
-		Params: struct {
-			Name      string                 `json:"name"`
-			Arguments map[string]interface{} `json:"arguments,omitempty"`
-			Meta      *struct {
-				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
-			} `json:"_meta,omitempty"`
-		}{
-			Arguments: map[string]interface{}{
-				"tweet_id": tweetID,
-			},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	if result.IsError {
-		return fmt.Errorf(result.Content[0].(*mcp.TextContent).Text)
-	}
-	return nil
-}
-
-// HandleRetweet handles retweeting a tweet
-func (a *Agent) HandleRetweet(ctx context.Context, tweetID string) error {
-	result, err := a.handleRetweet(ctx, mcp.CallToolRequest{
-		Params: struct {
-			Name      string                 `json:"name"`
-			Arguments map[string]interface{} `json:"arguments,omitempty"`
-			Meta      *struct {
-				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
-			} `json:"_meta,omitempty"`
-		}{
-			Arguments: map[string]interface{}{
-				"tweet_id": tweetID,
-			},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	if result.IsError {
-		return fmt.Errorf(result.Content[0].(*mcp.TextContent).Text)
-	}
-	return nil
 }

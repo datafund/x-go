@@ -13,10 +13,44 @@ import (
 func LoggingMiddleware(logger *log.Logger) mux.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			logger.Printf("%s %s", r.Method, r.URL.Path)
-			next.ServeHTTP(w, r)
+			// Create a response wrapper to capture the status code and headers
+			rw := &responseWriter{
+				ResponseWriter: w,
+				status:         http.StatusOK,
+				headers:        make(http.Header),
+			}
+
+			// Call the next handler
+			next.ServeHTTP(rw, r)
+
+			// Log after the request is processed
+			agentUsername := rw.Header().Get("X-Agent-Username")
+			if agentUsername == "" {
+				agentUsername = "unknown"
+			}
+			logger.Printf("%s %s [agent: %s] status: %d", r.Method, r.URL.Path, agentUsername, rw.status)
 		})
 	}
+}
+
+// responseWriter is a wrapper for http.ResponseWriter that captures the status code and headers
+type responseWriter struct {
+	http.ResponseWriter
+	status  int
+	headers http.Header
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Header() http.Header {
+	return rw.ResponseWriter.Header()
+}
+
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	return rw.ResponseWriter.Write(b)
 }
 
 func HandleGetUserTweetsWithManager(manager *twitter.AgentManager) http.HandlerFunc {
@@ -36,13 +70,14 @@ func HandleGetUserTweetsWithManager(manager *twitter.AgentManager) http.HandlerF
 			sortByOldest = true
 		}
 
-		result, err := manager.GetUserTweets(r.Context(), username, limit, sortByOldest)
+		result, agentUsername, err := manager.GetUserTweets(r.Context(), username, limit, sortByOldest)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(result)
 	}
 }
@@ -52,13 +87,14 @@ func HandleGetProfileWithManager(manager *twitter.AgentManager) http.HandlerFunc
 		vars := mux.Vars(r)
 		username := vars["username"]
 
-		result, err := manager.GetProfile(r.Context(), username)
+		result, agentUsername, err := manager.GetProfile(r.Context(), username)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(result)
 	}
 }
@@ -68,13 +104,14 @@ func HandleGetTweetWithManager(manager *twitter.AgentManager) http.HandlerFunc {
 		vars := mux.Vars(r)
 		tweetID := vars["id"]
 
-		result, err := manager.GetTweet(r.Context(), tweetID)
+		result, agentUsername, err := manager.GetTweet(r.Context(), tweetID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(result)
 	}
 }
@@ -90,13 +127,14 @@ func HandleSearchTweetsWithManager(manager *twitter.AgentManager) http.HandlerFu
 			}
 		}
 
-		result, err := manager.SearchTweets(r.Context(), query, limit)
+		result, agentUsername, err := manager.SearchTweets(r.Context(), query, limit)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(result)
 	}
 }
@@ -114,13 +152,14 @@ func HandleCreateTweetWithManager(manager *twitter.AgentManager) http.HandlerFun
 			return
 		}
 
-		result, err := manager.CreateTweet(r.Context(), req.Text, req.ScheduleTime)
+		result, agentUsername, err := manager.CreateTweet(r.Context(), req.Text, req.ScheduleTime)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(result)
 	}
 }
@@ -130,12 +169,14 @@ func HandleFollowUserWithManager(manager *twitter.AgentManager) http.HandlerFunc
 		vars := mux.Vars(r)
 		userID := vars["id"]
 
-		if err := manager.Follow(r.Context(), userID); err != nil {
+		agentUsername, err := manager.Follow(r.Context(), userID)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 	}
 }
@@ -145,12 +186,14 @@ func HandleUnfollowUserWithManager(manager *twitter.AgentManager) http.HandlerFu
 		vars := mux.Vars(r)
 		userID := vars["id"]
 
-		if err := manager.Unfollow(r.Context(), userID); err != nil {
+		agentUsername, err := manager.Unfollow(r.Context(), userID)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 	}
 }
@@ -160,12 +203,14 @@ func HandleLikeTweetWithManager(manager *twitter.AgentManager) http.HandlerFunc 
 		vars := mux.Vars(r)
 		tweetID := vars["id"]
 
-		if err := manager.LikeTweet(r.Context(), tweetID); err != nil {
+		agentUsername, err := manager.LikeTweet(r.Context(), tweetID)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 	}
 }
@@ -175,12 +220,14 @@ func HandleUnlikeTweetWithManager(manager *twitter.AgentManager) http.HandlerFun
 		vars := mux.Vars(r)
 		tweetID := vars["id"]
 
-		if err := manager.UnlikeTweet(r.Context(), tweetID); err != nil {
+		agentUsername, err := manager.UnlikeTweet(r.Context(), tweetID)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 	}
 }
@@ -190,12 +237,40 @@ func HandleRetweetWithManager(manager *twitter.AgentManager) http.HandlerFunc {
 		vars := mux.Vars(r)
 		tweetID := vars["id"]
 
-		if err := manager.Retweet(r.Context(), tweetID); err != nil {
+		agentUsername, err := manager.Retweet(r.Context(), tweetID)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	}
+}
+
+func HandleGetFollowersWithManager(manager *twitter.AgentManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		username := vars["username"]
+		limit := 50
+
+		if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+			if l, err := strconv.Atoi(limitStr); err == nil {
+				limit = l
+			}
+		}
+
+		cursor := r.URL.Query().Get("cursor")
+
+		result, agentUsername, err := manager.GetFollowers(r.Context(), username, limit, cursor)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
+		json.NewEncoder(w).Encode(result)
 	}
 }

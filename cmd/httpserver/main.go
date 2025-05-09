@@ -46,6 +46,7 @@ func main() {
 
 	// Endpoints that require login
 	if hasLoggedInAgent {
+		r.HandleFunc("/api/user/{username}/followers", handlers.HandleGetFollowersWithManager(agentManager)).Methods("GET")
 		r.HandleFunc("/api/search", handlers.HandleSearchTweetsWithManager(agentManager)).Methods("GET")
 		r.HandleFunc("/api/follow/{id}", handlers.HandleFollowUserWithManager(agentManager)).Methods("POST")
 		r.HandleFunc("/api/unfollow/{id}", handlers.HandleUnfollowUserWithManager(agentManager)).Methods("POST")
