@@ -1,0 +1,13 @@
+services:
+  x-go:
+    build:
+      context: . 
+      dockerfile: Dockerfile.http
+    ports:
+       - "8080:8080"
+    logging:
+      driver: "json-file"
+      options:
+        tag: '{{.ImageName}}|{{.Name}}|x-go|prod|{{.Hostname}}'
+
+
