@@ -1,15 +1,26 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/asabya/x-go/internal/handlers"
+	"github.com/asabya/x-go/internal/tasks"
 	"github.com/asabya/x-go/pkg/twitter"
 	"github.com/gorilla/mux"
+	_ "github.com/lib/pq" // postgres driver
+	"gopkg.in/yaml.v2"
 )
+
+type Config struct {
+	Usernames   []string `yaml:"usernames"`
+	PostgresURL string   `yaml:"postgres_url"`
+}
 
 func main() {
 	// Set up logging
@@ -19,6 +30,40 @@ func main() {
 	xgoPath := os.Getenv("XGO_PATH")
 	if xgoPath == "" {
 		logger.Fatalf("XGO_PATH is not set")
+	}
+
+	// Read config file from XGO_PATH
+	configPath := filepath.Join(xgoPath, "config.yaml")
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		logger.Fatalf("Error reading config file at %s: %v", configPath, err)
+	}
+
+	var config Config
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		logger.Fatalf("Error parsing config file: %v", err)
+	}
+	postgresURL := config.PostgresURL
+	if postgresURL[len(postgresURL)-1] != '?' {
+		postgresURL += "?"
+	}
+	if !strings.Contains(postgresURL, "sslmode=") {
+		if postgresURL[len(postgresURL)-1] != '?' {
+			postgresURL += "&"
+		}
+		postgresURL += "sslmode=disable"
+	}
+
+	// Connect to database
+	database, err := sql.Open("postgres", postgresURL)
+	if err != nil {
+		logger.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer database.Close()
+
+	// Test the connection
+	if err := database.Ping(); err != nil {
+		logger.Fatalf("Failed to ping database: %v", err)
 	}
 
 	// Create agent manager with account management
@@ -37,12 +82,17 @@ func main() {
 	}
 	fmt.Println("hasLoggedInAgent", hasLoggedInAgent)
 
+	// Start background tasks
+	tasks.StartProfileUpdates(database, agentManager, logger)
+	tasks.StartTweetUpdates(database, agentManager, logger)
+
 	r := mux.NewRouter()
 
 	// Basic endpoints that don't require login
 	r.HandleFunc("/api/user/{username}/tweets", handlers.HandleGetUserTweetsWithManager(agentManager)).Methods("GET")
 	r.HandleFunc("/api/user/{username}/profile", handlers.HandleGetProfileWithManager(agentManager)).Methods("GET")
 	r.HandleFunc("/api/tweet/{id}", handlers.HandleGetTweetWithManager(agentManager)).Methods("GET")
+	r.HandleFunc("/api/search/tweets", handlers.HandleSearchTweetsInDB(database)).Methods("GET")
 
 	// Endpoints that require login
 	if hasLoggedInAgent {

@@ -22,13 +22,7 @@ func LoggingMiddleware(logger *log.Logger) mux.MiddlewareFunc {
 
 			// Call the next handler
 			next.ServeHTTP(rw, r)
-
-			// Log after the request is processed
-			agentUsername := rw.Header().Get("X-Agent-Username")
-			if agentUsername == "" {
-				agentUsername = "unknown"
-			}
-			logger.Printf("%s %s [agent: %s] status: %d", r.Method, r.URL.Path, agentUsername, rw.status)
+			logger.Printf("%s %s status: %d", r.Method, r.URL.Path, rw.status)
 		})
 	}
 }

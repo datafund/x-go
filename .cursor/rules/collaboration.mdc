@@ -1,30 +1,95 @@
 ---
-description: >
+description: 
 globs: 
-alwaysApply: true
+alwaysApply: false
 ---
 
 # Collaboration Rules for AI Agent Development
 
-1. **Objective:** Define and implement an MCP-compliant API with `github.com/imperatrona/twitter-scraper`
-    * Focus on building AI agents that can interact with the Twitter API.
-    * Ensure agents are modular, reusable, and maintainable.
-    * Use the MCP (Multi-Agent Communication Protocol) for agent communication.
+1. **Objective:** 
+    * Keep What is already implemeanted
+    * use config.yaml to connect to postgres database
+    * write a migration script to create the users and tweets tables and insert all the usersnames from config.yaml in user table. keep rest of the fileds blank
+        ```
+        CREATE TABLE users (
+            ID BIGINT PRIMARY KEY
+            UserID BIGINT,
+            Username VARCHAR(50),
+            Name VARCHAR(100),
+            Biography TEXT,
+            Avatar TEXT,
+            Banner TEXT,
+            Birthday DATE,
+            Location VARCHAR(255),
+            URL TEXT,
+            Website TEXT,
+            Joined TIMESTAMP,
+            
+            TweetsCount INT,
+            LikesCount INT,
+            MediaCount INT,
+            FollowersCount INT,
+            FollowingCount INT,
+            FriendsCount INT,
+            NormalFollowersCount INT,
+            FastFollowersCount INT,
+            ListedCount INT,
 
+            IsVerified BOOLEAN,
+            IsPrivate BOOLEAN,
+            IsBlueVerified BOOLEAN,
+            CanHighlightTweets BOOLEAN,
+            HasGraduatedAccess BOOLEAN,
+            FollowedBy BOOLEAN,
+            Following BOOLEAN,
+            Sensitive BOOLEAN,
 
+            ProfileImageShape VARCHAR(50),
+        );
+
+        CREATE TABLE tweets (
+            ID BIGINT PRIMARY KEY,
+            UserID BIGINT, // id of users table
+            TweeterUserID BIGINT, // UserId from tweet
+            Username VARCHAR(50),
+            Name VARCHAR(100),
+            Text TEXT,
+            HTML TEXT,
+            TimeParsed TIMESTAMP,
+            Timestamp BIGINT,
+            PermanentURL TEXT,
+            Likes INT,
+            Replies INT,
+            Retweets INT,
+            Views INT,
+            IsPin BOOLEAN,
+            IsReply BOOLEAN,
+            IsQuoted BOOLEAN,
+            IsRetweet BOOLEAN,
+            IsSelfThread BOOLEAN,
+            SensitiveContent BOOLEAN,
+            RetweetedStatusID BIGINT,
+            QuotedStatusID BIGINT,
+            InReplyToStatusID BIGINT,
+            Place TEXT,
+        )
+        ```
+    * implement two goroutines to do the following. use the agentManager to so.
+        - getting user profiles, update in users table by username. get one profile every 10 seconds
+        - getting 20 user tweets, save in tweets table. search users table for username. go through all users every 6h
+
+    * Add another api to get latest tweets from database. string match `Text` field from `tweets` table given a qurey string. add qurey params for sorting likes, views, tweets per user
 2. **Technology Stack:**
-   * Use Go and use `github.com/imperatrona/twitter-scraper` and `github.com/mark3labs/mcp-go` library.
-   * Use `https://pkg.go.dev/github.com/imperatrona/twitter-scraper#section-documentation` to access X data.
-   - Tooling: go test, go mod, golangci-lint
+   * Use Go and use `github.com/lib/pq` and `github.com/mark3labs/mcp-go` library.
+   * Use `https://pkg.go.dev/github.com/lib/pq#section-documentation` to access postgres.
 
-3.  **MCP Focus:** Prioritize correct MCP implementation, defining resources, prompts, and tools according to needs. Ensure adherence to MCP specifications.
-4.  **Simplicity First:** Keep the implementation direct and avoid unnecessary complexity. Changes should be minimal and targeted.
-5.  **Code Standards:**
+3.  **Simplicity First:** Keep the implementation direct and avoid unnecessary complexity. Changes should be minimal and targeted.
+4.  **Code Standards:**
     *   Write idiomatic Go code.
     *   Follow Go best practices (e.g., effective Go).
     *   Keep code DRY (Don't Repeat Yourself).
     *   Provide complete functions or relevant code blocks for clarity.
 
-6.  **Communication:** Explain steps and reasoning. Ask questions or provide direction if needed.
-7.  **Tool Use:** Use available tools (read, search, edit) as needed, explaining the purpose.
+5.  **Communication:** Explain steps and reasoning. Ask questions or provide direction if needed.
+6.  **Tool Use:** Use available tools (read, search, edit) as needed, explaining the purpose.
 
