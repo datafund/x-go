@@ -3,8 +3,13 @@ services:
     build:
       context: . 
       dockerfile: Dockerfile.http
+    image: datafund/x-go:master
     ports:
        - "8080:8080"
+    volumes:
+       - ./accounts.json:/x-go/accounts.json
+       - ./config.yaml:/x-go/config.yaml
+       - ./cookies:/x-go/cookies
     logging:
       driver: "json-file"
       options:

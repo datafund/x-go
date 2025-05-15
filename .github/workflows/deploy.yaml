@@ -1,0 +1,23 @@
+name: deploy
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build_lp:
+    name: build x-go
+    runs-on: [self-hosted, pljudfmeme1]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: build docker image
+        run: docker build -t datafund/x-go:$GITHUB_REF_NAME -f Dockerfile.http .
+
+      - name: deploy
+        run: >
+             cd /opt/x-go && docker compose up -d
