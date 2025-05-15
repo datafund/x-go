@@ -9,42 +9,29 @@ import (
 )
 
 type SearchResponse struct {
+	Users []User `json:"users"`
+}
+
+type User struct {
+	Username           string `json:"username"`
+	UserIsVerified     bool   `json:"user_is_verified"`
+	UserIsPrivate      bool   `json:"user_is_private"`
+	UserIsBlueVerified bool   `json:"user_is_blue_verified"`
+	UserFollowingCount int    `json:"user_following_count"`
+	UserFollowersCount int    `json:"user_followers_count"`
+	UserLikesCount     int    `json:"user_likes_count"`
+	UserTweetsCount    int    `json:"user_tweets_count"`
+
 	Tweets []Tweet `json:"tweets"`
 }
 
+// Tweet represents the simplified tweet structure for the API response
 type Tweet struct {
-	ID                string `json:"id"`
-	UserID            string `json:"user_id"`
-	TweeterUserID     string `json:"tweeter_user_id"`
-	Username          string `json:"username"`
-	Name              string `json:"name"`
-	Text              string `json:"text"`
-	HTML              string `json:"html"`
-	TimeParsed        string `json:"time_parsed"`
-	Timestamp         int64  `json:"timestamp"`
-	PermanentURL      string `json:"permanent_url"`
-	Likes             int    `json:"likes"`
-	Replies           int    `json:"replies"`
-	Retweets          int    `json:"retweets"`
-	Views             int    `json:"views"`
-	IsPin             bool   `json:"is_pin"`
-	IsReply           bool   `json:"is_reply"`
-	IsQuoted          bool   `json:"is_quoted"`
-	IsRetweet         bool   `json:"is_retweet"`
-	IsSelfThread      bool   `json:"is_self_thread"`
-	SensitiveContent  bool   `json:"sensitive_content"`
-	RetweetedStatusID string `json:"retweeted_status_id"`
-	QuotedStatusID    string `json:"quoted_status_id"`
-	InReplyToStatusID string `json:"in_reply_to_status_id"`
-	Place             string `json:"place"`
-	// User fields
-	UserIsVerified     bool `json:"user_is_verified"`
-	UserIsPrivate      bool `json:"user_is_private"`
-	UserIsBlueVerified bool `json:"user_is_blue_verified"`
-	UserFollowingCount int  `json:"user_following_count"`
-	UserFollowersCount int  `json:"user_followers_count"`
-	UserLikesCount     int  `json:"user_likes_count"`
-	UserTweetsCount    int  `json:"user_tweets_count"`
+	Text     string `json:"text"`
+	Likes    int    `json:"likes"`
+	Replies  int    `json:"replies"`
+	Retweets int    `json:"retweets"`
+	Views    int    `json:"views"`
 }
 
 // HandleSearchTweetsInDB handles searching tweets in the database
@@ -84,20 +71,14 @@ func HandleSearchTweetsInDB(db *sql.DB) http.HandlerFunc {
 			limit = parsedLimit
 		}
 
-		// Build the query with user join
+		// Build the query with user join - only select needed fields
 		sqlQuery := `
 			SELECT 
-				t.id, t.user_id, t.tweeter_user_id, t.username, t.name, t.text, t.html,
-				t.time_parsed, t.timestamp, t.permanent_url, t.likes, t.replies,
-				t.retweets, t.views, t.is_pin, t.is_reply, t.is_quoted, t.is_retweet,
-				t.is_self_thread, t.sensitive_content, t.retweeted_status_id,
-				t.quoted_status_id, t.in_reply_to_status_id, t.place,
-				u.is_verified as user_is_verified, u.is_private as user_is_private,
-				u.is_blue_verified as user_is_blue_verified,
-				u.following_count as user_following_count,
-				u.followers_count as user_followers_count,
-				u.likes_count as user_likes_count,
-				u.tweets_count as user_tweets_count
+				t.user_id,
+				t.text, t.likes, t.replies, t.retweets, t.views,
+				u.is_verified, u.is_private, u.is_blue_verified,
+				u.following_count, u.followers_count,
+				u.likes_count, u.tweets_count, u.username
 			FROM tweets t
 			LEFT JOIN users u ON t.user_id = u.id
 			WHERE t.text ILIKE $1
@@ -111,54 +92,56 @@ func HandleSearchTweetsInDB(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		var tweets []Tweet
+		// Map to store users and their tweets
+		userMap := make(map[int64]*User)
+
 		for rows.Next() {
-			var t Tweet
+			var userID int64
+			var tweet Tweet
 			// Temporary variables for handling NULL values
 			var userIsVerified, userIsPrivate, userIsBlueVerified sql.NullBool
 			var userFollowingCount, userFollowersCount, userLikesCount, userTweetsCount sql.NullInt64
-
+			var userUsername sql.NullString
 			err := rows.Scan(
-				&t.ID, &t.UserID, &t.TweeterUserID, &t.Username, &t.Name, &t.Text, &t.HTML,
-				&t.TimeParsed, &t.Timestamp, &t.PermanentURL, &t.Likes, &t.Replies,
-				&t.Retweets, &t.Views, &t.IsPin, &t.IsReply, &t.IsQuoted, &t.IsRetweet,
-				&t.IsSelfThread, &t.SensitiveContent, &t.RetweetedStatusID,
-				&t.QuotedStatusID, &t.InReplyToStatusID, &t.Place,
+				&userID,
+				&tweet.Text, &tweet.Likes, &tweet.Replies, &tweet.Retweets, &tweet.Views,
 				&userIsVerified, &userIsPrivate, &userIsBlueVerified,
 				&userFollowingCount, &userFollowersCount,
-				&userLikesCount, &userTweetsCount,
+				&userLikesCount, &userTweetsCount, &userUsername,
 			)
 			if err != nil {
 				http.Error(w, fmt.Sprintf("Error scanning tweet: %v", err), http.StatusInternalServerError)
 				return
 			}
 
-			// Convert NULL values to appropriate defaults
-			t.UserIsVerified = userIsVerified.Valid && userIsVerified.Bool
-			t.UserIsPrivate = userIsPrivate.Valid && userIsPrivate.Bool
-			t.UserIsBlueVerified = userIsBlueVerified.Valid && userIsBlueVerified.Bool
-			t.UserFollowingCount = int(userFollowingCount.Int64)
-			if !userFollowingCount.Valid {
-				t.UserFollowingCount = 0
-			}
-			t.UserFollowersCount = int(userFollowersCount.Int64)
-			if !userFollowersCount.Valid {
-				t.UserFollowersCount = 0
-			}
-			t.UserLikesCount = int(userLikesCount.Int64)
-			if !userLikesCount.Valid {
-				t.UserLikesCount = 0
-			}
-			t.UserTweetsCount = int(userTweetsCount.Int64)
-			if !userTweetsCount.Valid {
-				t.UserTweetsCount = 0
+			// Get or create user
+			user, exists := userMap[userID]
+			if !exists {
+				user = &User{
+					UserIsVerified:     userIsVerified.Valid && userIsVerified.Bool,
+					UserIsPrivate:      userIsPrivate.Valid && userIsPrivate.Bool,
+					UserIsBlueVerified: userIsBlueVerified.Valid && userIsBlueVerified.Bool,
+					UserFollowingCount: int(userFollowingCount.Int64),
+					UserFollowersCount: int(userFollowersCount.Int64),
+					UserLikesCount:     int(userLikesCount.Int64),
+					UserTweetsCount:    int(userTweetsCount.Int64),
+					Username:           userUsername.String,
+					Tweets:             make([]Tweet, 0),
+				}
+				userMap[userID] = user
 			}
 
-			tweets = append(tweets, t)
+			user.Tweets = append(user.Tweets, tweet)
+		}
+
+		// Convert map to slice
+		users := make([]User, 0, len(userMap))
+		for _, user := range userMap {
+			users = append(users, *user)
 		}
 
 		response := SearchResponse{
-			Tweets: tweets,
+			Users: users,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
