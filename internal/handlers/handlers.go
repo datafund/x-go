@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 
+	"github.com/asabya/x-go/internal/tasks"
 	"github.com/asabya/x-go/pkg/twitter"
 	"github.com/gorilla/mux"
 )
@@ -266,5 +269,60 @@ func HandleGetFollowersWithManager(manager *twitter.AgentManager) http.HandlerFu
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Agent-Username", agentUsername)
 		json.NewEncoder(w).Encode(result)
+	}
+}
+
+func HandleAddUser(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req tasks.Profile
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		if req.Username == "" {
+			http.Error(w, "Username is required", http.StatusBadRequest)
+			return
+		}
+
+		// Insert the user into the database with all fields
+		_, err := db.Exec(`
+			INSERT INTO users (
+				user_id, username, name, biography, avatar, banner,
+				birthday, location, url, website, joined,
+				tweets_count, likes_count, media_count,
+				followers_count, following_count, friends_count,
+				normal_followers_count, fast_followers_count, listed_count,
+				is_verified, is_private, is_blue_verified,
+				can_highlight_tweets, has_graduated_access,
+				followed_by, following, sensitive,
+				profile_image_shape
+			) VALUES (
+				$1, $2, $3, $4, $5, $6, NULLIF($7, '')::date, $8, $9, $10, $11,
+				$12, $13, $14, $15, $16, $17, $18, $19, $20,
+				$21, $22, $23, $24, $25, $26, $27, $28, $29
+			)
+			ON CONFLICT (username) DO NOTHING`,
+			req.UserID, req.Username, req.Name, req.Biography, req.Avatar, req.Banner,
+			req.Birthday, req.Location, req.URL, req.Website, req.Joined,
+			req.TweetsCount, req.LikesCount, req.MediaCount,
+			req.FollowersCount, req.FollowingCount, req.FriendsCount,
+			req.NormalFollowersCount, req.FastFollowersCount, req.ListedCount,
+			req.IsVerified, req.IsPrivate, req.IsBlueVerified,
+			req.CanHighlightTweets, req.HasGraduatedAccess,
+			req.FollowedBy, req.Following, req.Sensitive,
+			req.ProfileImageShape)
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error adding user: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "success",
+			"message": "User added successfully",
+		})
 	}
 }
