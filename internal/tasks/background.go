@@ -73,7 +73,7 @@ type Tweet struct {
 func StartProfileUpdates(db *sql.DB, agentManager *twitter.AgentManager, logger *log.Logger) {
 	go func() {
 		for {
-			rows, err := db.Query("SELECT user_id, username FROM users WHERE user_id IS NULL")
+			rows, err := db.Query("SELECT username FROM users WHERE user_id IS NULL")
 			if err != nil {
 				logger.Printf("Error querying users: %v", err)
 				time.Sleep(10 * time.Second)
