@@ -539,3 +539,43 @@ func (am *AgentManager) GetFollowers(ctx context.Context, username string, limit
 	am.logger.Printf("Successfully retrieved followers for user %s", username)
 	return data, agentUsername, nil
 }
+
+// GetTweetReplies gets replies to a specific tweet using the next available agent
+func (am *AgentManager) GetTweetReplies(ctx context.Context, tweetID string, cursor string) (interface{}, string, error) {
+	agent, agentUsername := am.getNextAgent()
+	am.logger.Printf("Getting replies for tweet %s using agent %s", tweetID, agentUsername)
+
+	result, err := agent.handleGetTweetReplies(ctx, mcp.CallToolRequest{
+		Params: struct {
+			Name      string                 `json:"name"`
+			Arguments map[string]interface{} `json:"arguments,omitempty"`
+			Meta      *struct {
+				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
+			} `json:"_meta,omitempty"`
+		}{
+			Name: "get_tweet_replies",
+			Arguments: map[string]interface{}{
+				"tweet_id": tweetID,
+				"cursor":   cursor,
+			},
+		},
+	})
+	if err != nil {
+		am.logger.Printf("Error getting replies for tweet %s: %v", tweetID, err)
+		return nil, agentUsername, err
+	}
+	if result.IsError {
+		errMsg := result.Content[0].(*mcp.TextContent).Text
+		am.logger.Printf("Error in response for tweet replies %s: %s", tweetID, errMsg)
+		return nil, agentUsername, fmt.Errorf(errMsg)
+	}
+
+	var data interface{}
+	if err := json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &data); err != nil {
+		am.logger.Printf("Error unmarshaling replies response for tweet %s: %v", tweetID, err)
+		return nil, agentUsername, err
+	}
+
+	am.logger.Printf("Successfully retrieved replies for tweet %s", tweetID)
+	return data, agentUsername, nil
+}

@@ -92,6 +92,7 @@ func main() {
 	r.HandleFunc("/api/user/{username}/tweets", handlers.HandleGetUserTweetsWithManager(agentManager)).Methods("GET")
 	r.HandleFunc("/api/user/{username}/profile", handlers.HandleGetProfileWithManager(agentManager)).Methods("GET")
 	r.HandleFunc("/api/tweet/{id}", handlers.HandleGetTweetWithManager(agentManager)).Methods("GET")
+	r.HandleFunc("/api/tweet/{id}/replies", handlers.HandleGetTweetRepliesWithManager(agentManager)).Methods("GET")
 	r.HandleFunc("/api/search/tweets", handlers.HandleSearchTweetsInDB(database)).Methods("GET")
 	r.HandleFunc("/api/users", handlers.HandleAddUser(database)).Methods("POST")
 

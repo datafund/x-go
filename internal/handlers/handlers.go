@@ -272,6 +272,24 @@ func HandleGetFollowersWithManager(manager *twitter.AgentManager) http.HandlerFu
 	}
 }
 
+func HandleGetTweetRepliesWithManager(manager *twitter.AgentManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		tweetID := vars["id"]
+		cursor := r.URL.Query().Get("cursor")
+
+		result, agentUsername, err := manager.GetTweetReplies(r.Context(), tweetID, cursor)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Agent-Username", agentUsername)
+		json.NewEncoder(w).Encode(result)
+	}
+}
+
 func HandleAddUser(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req tasks.Profile

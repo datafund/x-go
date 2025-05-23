@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	twitterscraper "github.com/imperatrona/twitter-scraper"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -18,6 +19,7 @@ type Scraper interface {
 	GetProfile(ctx context.Context, username string) (*twitterscraper.Profile, error)
 	GetTweets(ctx context.Context, username string, maxTweetsNb int) <-chan *twitterscraper.TweetResult
 	GetTweet(ctx context.Context, id string) (*twitterscraper.Tweet, error)
+	GetTweetReplies(id string, cursor string) ([]*twitterscraper.Tweet, []*twitterscraper.ThreadCursor, error)
 	SearchTweets(ctx context.Context, query string, maxTweetsNb int) <-chan *twitterscraper.TweetResult
 	Tweet(ctx context.Context, text string) (*twitterscraper.Tweet, error)
 	LikeTweet(ctx context.Context, id string) error
@@ -166,6 +168,32 @@ func (a *Agent) GetTools() []server.ServerTool {
 				},
 			},
 			Handler: a.handleGetFollowers,
+		},
+		{
+			Tool: mcp.Tool{
+				Name:        "get_tweet_replies",
+				Description: "Get replies to a specific tweet",
+				InputSchema: mcp.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]interface{}{
+						"tweet_id": map[string]interface{}{
+							"type":        "string",
+							"description": "ID of the tweet to get replies for",
+						},
+						"cursor": map[string]interface{}{
+							"type":        "string",
+							"description": "Cursor for pagination",
+						},
+					},
+					Required: []string{"tweet_id"},
+				},
+				Annotations: mcp.ToolAnnotation{
+					Title:         "Get Tweet Replies",
+					ReadOnlyHint:  BoolPtr(true),
+					OpenWorldHint: BoolPtr(true),
+				},
+			},
+			Handler: a.handleGetTweetReplies,
 		},
 	}
 
@@ -1023,6 +1051,126 @@ func (a *Agent) handleGetFollowers(ctx context.Context, request mcp.CallToolRequ
 	result := map[string]interface{}{
 		"followers":   followers,
 		"next_cursor": nextCursor,
+	}
+
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("error marshaling results: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Type: "text",
+				Text: string(jsonData),
+			},
+		},
+	}, nil
+}
+
+func (a *Agent) handleGetTweetReplies(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	tweetID, ok := request.Params.Arguments["tweet_id"].(string)
+	if !ok || tweetID == "" {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: "tweet_id parameter is required",
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	cursor := ""
+	if cursorVal, ok := request.Params.Arguments["cursor"].(string); ok {
+		cursor = cursorVal
+	}
+
+	// Wait for rate limit
+	if err := a.limiter.waitForEndpoint(ctx, "get_tweet_replies"); err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("rate limit error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	replies, nextCursor, err := a.scraper.GetTweetReplies(tweetID, cursor)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("error getting tweet replies: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	// Create simplified tweet structures to avoid circular references
+	type SimplifiedTweet struct {
+		ID         string    `json:"id"`
+		Text       string    `json:"text"`
+		Username   string    `json:"username"`
+		Name       string    `json:"name"`
+		Likes      int       `json:"likes"`
+		Retweets   int       `json:"retweets"`
+		Replies    int       `json:"replies"`
+		TimeParsed time.Time `json:"timestamp"`
+	}
+
+	simplifiedReplies := make([]SimplifiedTweet, 0, len(replies))
+	for _, reply := range replies {
+		simplifiedReplies = append(simplifiedReplies, SimplifiedTweet{
+			ID:         reply.ID,
+			Text:       reply.Text,
+			Username:   reply.Username,
+			Name:       reply.Name,
+			Likes:      reply.Likes,
+			Retweets:   reply.Retweets,
+			Replies:    reply.Replies,
+			TimeParsed: reply.TimeParsed,
+		})
+	}
+
+	// Create simplified cursor structure
+	type SimplifiedCursor struct {
+		FocalTweetID string `json:"focal_tweet_id"`
+		ThreadID     string `json:"thread_id"`
+		Cursor       string `json:"cursor"`
+		CursorType   string `json:"cursor_type"`
+	}
+
+	simplifiedCursors := make([]SimplifiedCursor, 0, len(nextCursor))
+	for _, cursor := range nextCursor {
+		simplifiedCursors = append(simplifiedCursors, SimplifiedCursor{
+			FocalTweetID: cursor.FocalTweetID,
+			ThreadID:     cursor.ThreadID,
+			Cursor:       cursor.Cursor,
+			CursorType:   cursor.CursorType,
+		})
+	}
+
+	result := struct {
+		Replies    []SimplifiedTweet  `json:"replies"`
+		NextCursor []SimplifiedCursor `json:"next_cursor"`
+	}{
+		Replies:    simplifiedReplies,
+		NextCursor: simplifiedCursors,
 	}
 
 	jsonData, err := json.Marshal(result)
