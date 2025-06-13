@@ -7,8 +7,10 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/asabya/x-go/internal/tasks"
+	"github.com/asabya/x-go/pkg/getmoni"
 	"github.com/asabya/x-go/pkg/twitter"
 	"github.com/gorilla/mux"
 )
@@ -341,6 +343,102 @@ func HandleAddUser(db *sql.DB) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]string{
 			"status":  "success",
 			"message": "User added successfully",
+		})
+	}
+}
+
+// HandleSaveSmartFollowers handles the request to get and save smart followers
+func HandleSaveSmartFollowers(getmoni *getmoni.GetMoni, db *sql.DB, newUsers chan string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		username := vars["username"]
+
+		// Get smart followers from GetMoni with default parameters
+		result, err := getmoni.GetSmartFollowers(username, 100, 0, "FOLLOWERS_COUNT", "DESC")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if len(result.Items) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":  "success",
+				"message": "No followers to save",
+				"data":    result,
+			})
+			return
+		}
+
+		// Build the bulk insert query
+		query := `
+			INSERT INTO smart_users (
+				user_id, username, name, biography, avatar, banner,
+				joined, tweets_count, followers_count
+			) VALUES 
+		`
+
+		// Prepare the values and args
+		values := make([]string, 0, len(result.Items))
+		args := make([]interface{}, 0, len(result.Items)*9)
+		argCount := 1
+
+		for _, item := range result.Items {
+			meta := item.Meta
+			values = append(values, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+				argCount, argCount+1, argCount+2, argCount+3, argCount+4, argCount+5, argCount+6, argCount+7, argCount+8))
+
+			args = append(args,
+				meta.TwitterUserID,
+				meta.Username,
+				meta.Name,
+				meta.Description,
+				meta.ProfileImageURL,
+				meta.ProfileBannerURL,
+				meta.TwitterCreatedAt,
+				meta.TweetCount,
+				meta.FollowersCount,
+			)
+			argCount += 9
+		}
+
+		// Add the ON CONFLICT clause
+		query += strings.Join(values, ",") + `
+			ON CONFLICT (username) DO UPDATE SET
+				user_id = EXCLUDED.user_id,
+				name = EXCLUDED.name,
+				biography = EXCLUDED.biography,
+				avatar = EXCLUDED.avatar,
+				banner = EXCLUDED.banner,
+				joined = EXCLUDED.joined,
+				tweets_count = EXCLUDED.tweets_count,
+				followers_count = EXCLUDED.followers_count
+		`
+
+		// Execute the bulk insert
+		_, err = db.Exec(query, args...)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error inserting followers: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Send each new user to the channel for immediate tweet processing
+		for _, item := range result.Items {
+			log.Printf("Attempting to send user %s to processing channel", item.Meta.Username)
+			select {
+			case newUsers <- item.Meta.Username:
+				log.Printf("Successfully sent user %s to processing channel", item.Meta.Username)
+			default:
+				// Channel is full or closed, log error but continue
+				log.Printf("Warning: Could not send user %s to processing channel", item.Meta.Username)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": fmt.Sprintf("Successfully saved %d smart followers", len(result.Items)),
+			"data":    result,
 		})
 	}
 }

@@ -2,3 +2,4 @@ usernames:
   - heygordonai  
 
 postgres_url: "postgresql://postgres:password@localhost:5432/db"
+getmoni_api_key: "24ed2510-ba37-4b1e-bf15-8d798f1e38d2"

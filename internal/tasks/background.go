@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -211,4 +212,118 @@ func StartTweetUpdates(db *sql.DB, agentManager *twitter.AgentManager, logger *l
 			time.Sleep(6 * time.Hour)
 		}
 	}()
+}
+
+// StartSmartTweetUpdates starts a goroutine that updates smart user tweets periodically
+// and also processes new users received through the newUsers channel
+func StartSmartTweetUpdates(ctx context.Context, db *sql.DB, agentManager *twitter.AgentManager, logger *log.Logger, newUsers chan string) {
+	logger.Printf("Starting smart tweet updates goroutine")
+	go func() {
+		logger.Printf("Smart tweet updates goroutine started")
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				logger.Printf("Stopping smart tweet updates due to context cancellation")
+				return
+			case username, ok := <-newUsers:
+				if !ok {
+					logger.Printf("Channel closed, stopping goroutine")
+					return
+				}
+				logger.Printf("Received new user %s from channel", username)
+				// Process a new user immediately
+				if err := processSmartUserTweets(db, agentManager, logger, username); err != nil {
+					logger.Printf("Error processing new smart user %s: %v", username, err)
+				}
+			case <-ticker.C:
+				logger.Printf("Running periodic updates...")
+				// Process all users periodically
+				rows, err := db.Query("SELECT username, id FROM smart_users")
+				if err != nil {
+					logger.Printf("Error querying smart users: %v", err)
+					continue
+				}
+				defer rows.Close()
+
+				for rows.Next() {
+					select {
+					case <-ctx.Done():
+						logger.Printf("Stopping smart tweet updates due to context cancellation")
+						return
+					default:
+						var username string
+						var userID string
+						if err := rows.Scan(&username, &userID); err != nil {
+							logger.Printf("Error scanning smart user data: %v", err)
+							continue
+						}
+
+						if err := processSmartUserTweets(db, agentManager, logger, username); err != nil {
+							logger.Printf("Error processing smart user %s: %v", username, err)
+						}
+
+						// Add a small delay between processing each user to avoid rate limiting
+						time.Sleep(10 * time.Second)
+					}
+				}
+			}
+		}
+	}()
+}
+
+// processSmartUserTweets handles the tweet fetching and database updates for a single smart user
+func processSmartUserTweets(db *sql.DB, agentManager *twitter.AgentManager, logger *log.Logger, username string) error {
+	// Get user ID from database
+	var userID string
+	err := db.QueryRow("SELECT id FROM smart_users WHERE username = $1", username).Scan(&userID)
+	if err != nil {
+		return fmt.Errorf("error getting user ID for %s: %v", username, err)
+	}
+
+	tweetsData, _, err := agentManager.GetUserTweets(context.Background(), username, 20, false)
+	if err != nil {
+		return fmt.Errorf("error getting tweets for smart user %s: %v", username, err)
+	}
+
+	// Convert interface{} to []Tweet
+	tweetsBytes, err := json.Marshal(tweetsData)
+	if err != nil {
+		return fmt.Errorf("error marshaling smart user tweets data: %v", err)
+	}
+
+	var tweets []Tweet
+	if err := json.Unmarshal(tweetsBytes, &tweets); err != nil {
+		return fmt.Errorf("error unmarshaling smart user tweets data: %v", err)
+	}
+
+	for _, tweet := range tweets {
+		// Insert tweet if it doesn't exist
+		_, err = db.Exec(`
+			INSERT INTO smart_tweets (
+				id, user_id, tweeter_user_id, username, name, text, html,
+				time_parsed, timestamp, permanent_url, likes, replies,
+				retweets, views, is_pin, is_reply, is_quoted, is_retweet,
+				is_self_thread, sensitive_content, retweeted_status_id,
+				quoted_status_id, in_reply_to_status_id, place
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+			ON CONFLICT (id) DO UPDATE SET
+				likes = EXCLUDED.likes,
+				replies = EXCLUDED.replies,
+				retweets = EXCLUDED.retweets,
+				views = EXCLUDED.views`,
+			tweet.ID, userID, tweet.UserID, tweet.Username, tweet.Name, tweet.Text, tweet.HTML,
+			tweet.TimeParsed, tweet.Timestamp, tweet.PermanentURL, tweet.Likes, tweet.Replies,
+			tweet.Retweets, tweet.Views, tweet.IsPin, tweet.IsReply, tweet.IsQuoted, tweet.IsRetweet,
+			tweet.IsSelfThread, tweet.SensitiveContent, tweet.RetweetedStatusID,
+			tweet.QuotedStatusID, tweet.InReplyToStatusID, tweet.Place)
+
+		if err != nil {
+			return fmt.Errorf("error inserting/updating smart tweet: %v", err)
+		}
+	}
+
+	return nil
 }
