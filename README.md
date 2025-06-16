@@ -37,6 +37,7 @@ usernames:
   # Add more usernames to track
 
 postgres_url: "postgres://username:password@localhost:5432/dbname"
+getmoni_api_key: "your_getmoni_api_key" # Required for GetMoni API integration
 ```
 
 ### Database Migration
@@ -51,6 +52,13 @@ This will:
 1. Create the necessary database tables if they don't exist
 2. Insert usernames from config.yaml into the users table
 3. Set up indexes and constraints
+
+### GetMoni API Integration
+
+The service integrates with the GetMoni API for additional functionality. To use this feature:
+
+1. Obtain an API key from GetMoni
+2. Add the `getmoni_api_key` to your `config.yaml`
 
 ## API Endpoints
 
